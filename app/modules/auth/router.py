@@ -21,6 +21,12 @@ async def register(
     user_in: UserRegister,
     session: AsyncSession = Depends(get_session)
 ):
+    """
+    Register the Master Administrator account.
+    
+    This is a personal app, meaning registration is strictly restricted and locked down
+    after the first successful registration has occurred.
+    """
     # check if any user already exists in the database
     any_user_statement = select(User)
     any_user_result = await session.exec(any_user_statement)
@@ -58,6 +64,12 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     session: AsyncSession = Depends(get_session)
 ):
+    """
+    OAuth2-compatible token exchange endpoint.
+    
+    Accepts form data containing username and password, authenticates credentials,
+    and returns a stateless JWT token.
+    """
     # finding user in database
     statement = select(User).where(User.username == form_data.username)
     result = await session.exec(statement)
@@ -81,4 +93,9 @@ async def login(
 async def read_users_me(
     current_user: User = Depends(get_current_user)
 ):
+    """
+    Retrieve currently logged-in administrator profile details.
+    
+    Requires a valid JWT Bearer token in the Authorization header.
+    """
     return current_user
