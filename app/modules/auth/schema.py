@@ -3,10 +3,10 @@ from pydantic import BaseModel, Field
 class UserRegister(BaseModel):
     """
     DTO payload containing registration credentials for the single administrator.
-    Enforces pattern restrictions on both username and password for security.
+    Enforces pattern restrictions on username and a minimum length of 8 characters for password.
     """
     username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_]*$")
-    password: str = Field(..., min_length=8, pattern=r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$")
+    password: str = Field(..., min_length=8)
 
 class UserResponse(BaseModel):
     """
