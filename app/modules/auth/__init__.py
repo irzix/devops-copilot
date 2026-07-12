@@ -1,0 +1,9 @@
+from sqlmodel import SQLModel, Field
+from typing import Optional
+
+# user model
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)    
+    username: str = Field(index=True, unique=True, nullable=False)
+    hashed_password: str = Field(nullable=False)
+    is_active: bool = Field(default=True)
