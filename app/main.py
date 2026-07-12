@@ -4,11 +4,14 @@ from contextlib import asynccontextmanager
 from app.core.database import create_db_and_tables
 from app.modules.auth.router import router as auth_router
 from app.modules.servers.router import router as servers_router
+from app.modules.guardrails.service import init_and_seed_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create DB tables on startup
     await create_db_and_tables()
+    # Initialize and seed ChromaDB local vector store
+    await init_and_seed_db()
     yield
 
 app = FastAPI(
