@@ -1,0 +1,48 @@
+from fastapi import APIRouter, Depends, status
+from typing import List
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_session
+from app.modules.auth import User
+from app.modules.auth.service import get_current_user
+from app.modules.servers.schema import ServerCreate, ServerResponse, CommandRequest, CommandResponse
+from app.modules.servers.service import servers_service
+
+router = APIRouter()
+
+@router.post("/", response_model=ServerResponse, status_code=status.HTTP_201_CREATED)
+async def create_server(
+    server_in: ServerCreate,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Register a new server connection under the logged-in administrator."""
+    return await servers_service.create_server(session, server_in, current_user.id)
+
+@router.get("/", response_model=List[ServerResponse])
+async def list_servers(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Retrieve all managed servers registered to the current administrator."""
+    return await servers_service.get_all_servers(session, current_user.id)
+
+@router.get("/{server_id}", response_model=ServerResponse)
+async def get_server(
+    server_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Retrieve specific server credentials configuration metadata."""
+    return await servers_service.get_server_by_id(session, server_id, current_user.id)
+
+@router.post("/{server_id}/execute", response_model=CommandResponse)
+async def execute_command(
+    server_id: int,
+    payload: CommandRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Execute arbitrary terminal commands asynchronously on target server via secure SSH connection."""
+    server = await servers_service.get_server_by_id(session, server_id, current_user.id)
+    return await servers_service.execute_ssh_command(server, payload.command)
