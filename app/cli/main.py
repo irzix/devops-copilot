@@ -35,15 +35,25 @@ def login(
             data={"username": username, "password": password},
             timeout=10.0
         )
+        try:
+            response_json = response.json()
+        except (ValueError, TypeError):
+            response_json = None
+
         if response.status_code == 200:
-            token_data = response.json()
-            token = token_data.get("access_token")
-            save_config(server_url_clean, token)
-            typer.secho("Success! Authenticated and configured locally.", fg=typer.colors.GREEN, bold=True)
+            if response_json:
+                token = response_json.get("access_token")
+                save_config(server_url_clean, token)
+                typer.secho("Success! Authenticated and configured locally.", fg=typer.colors.GREEN, bold=True)
+            else:
+                typer.secho("Authentication Failed: Server returned non-JSON response.", fg=typer.colors.RED, err=True)
+                raise typer.Exit(code=1)
         else:
-            detail = response.json().get("detail", "Invalid username or password")
+            detail = response_json.get("detail") if response_json else f"HTTP Status {response.status_code}: {response.text[:200]}"
             typer.secho(f"Authentication Failed: {detail}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.secho(f"Connection Error: {str(e)}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
@@ -172,7 +182,13 @@ def chat():
             typer.secho("Session expired. Please run 'devops-rag login' again.", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
         response.raise_for_status()
-        sessions = response.json()
+        try:
+            sessions = response.json()
+        except (ValueError, TypeError):
+            typer.secho(f"Failed to fetch sessions: Server returned non-JSON response (HTTP {response.status_code}).", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.secho(f"Failed to fetch sessions: {str(e)}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
@@ -211,8 +227,14 @@ def chat():
                 timeout=10.0
             )
             res.raise_for_status()
-            new_sess = res.json()
-            session_id = new_sess["id"]
+            try:
+                new_sess = res.json()
+                session_id = new_sess["id"]
+            except (ValueError, TypeError, KeyError):
+                typer.secho(f"Failed to create new session: Server returned invalid format.", fg=typer.colors.RED, err=True)
+                raise typer.Exit(code=1)
+        except typer.Exit:
+            raise
         except Exception as e:
             typer.secho(f"Failed to create new session: {str(e)}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
