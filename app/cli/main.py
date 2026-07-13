@@ -173,18 +173,20 @@ def chat():
     session_id = None
     if sessions:
         typer.echo("\nAvailable chat sessions:")
-        for idx, s in enumerate(sessions):
-            typer.echo(f"  [{idx + 1}] Session ID: {s['id']} | Title: {s['title']}")
+        session_ids = []
+        for s in sessions:
+            typer.echo(f"  Session ID: {s['id']} | Title: {s['title']}")
+            session_ids.append(s['id'])
         
-        choice = typer.prompt("\nSelect session number, or type 'new' to start a new chat")
+        choice = typer.prompt("\nSelect Session ID, or type 'new' to start a new chat")
         
         if choice.lower() != "new":
             try:
-                choice_idx = int(choice) - 1
-                if 0 <= choice_idx < len(sessions):
-                    session_id = sessions[choice_idx]["id"]
+                val = int(choice)
+                if val in session_ids:
+                    session_id = val
                 else:
-                    typer.secho("Invalid choice index.", fg=typer.colors.RED)
+                    typer.secho("Invalid Session ID.", fg=typer.colors.RED)
                     raise typer.Exit(code=1)
             except ValueError:
                 typer.secho("Invalid input format.", fg=typer.colors.RED)

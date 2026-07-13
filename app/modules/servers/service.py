@@ -57,6 +57,18 @@ class ServersService:
             )
         return server
 
+    async def get_server_by_name(self, session: AsyncSession, name: str, owner_id: int) -> Optional[Server]:
+        """Fetch a specific server by name and verify ownership."""
+        statement = select(Server).where(Server.name == name, Server.owner_id == owner_id)
+        result = await session.exec(statement)
+        server = result.first()
+        if not server:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Server not found"
+            )
+        return server
+
     async def execute_ssh_command(self, server: Server, command: str) -> dict:
         """
         Decrypt server connection credentials, establish SSH tunnel,

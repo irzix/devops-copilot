@@ -251,9 +251,13 @@ async def websocket_endpoint(
                     async with asyncssh.connect(**conn_args) as conn:
                         async with conn.create_process(action.command) as process:
                             async for line in process.stdout:
+                                if isinstance(line, bytes):
+                                    line = line.decode("utf-8", errors="replace")
                                 stdout_accumulated.append(line)
                                 await websocket.send_json({"type": "stdout", "data": line})
                             async for line in process.stderr:
+                                if isinstance(line, bytes):
+                                    line = line.decode("utf-8", errors="replace")
                                 stderr_accumulated.append(line)
                                 await websocket.send_json({"type": "stderr", "data": line})
                             exit_status = await process.wait()

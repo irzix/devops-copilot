@@ -114,94 +114,123 @@ async def list_available_servers() -> str:
         return f"Error retrieving server list: {str(e)}"
 
 @tool
-async def execute_ssh_command(server_id: int, command: str) -> str:
+async def execute_ssh_command(server_id: int | str, command: str) -> str:
     """
     Execute a terminal command asynchronously on a target server via SSH.
     First runs semantic security checks and determines if human-in-the-loop approval is required.
     Streams execution logs line-by-line in real-time to the active terminal session.
     """
-    # 1. Run semantic safety guardrail
-    from app.modules.guardrails.service import is_command_safe
-    is_safe, warning, similarity = is_command_safe(command)
-    if not is_safe:
-        return f"Execution Blocked by Guardrail: {warning} (similarity index: {similarity:.2f})"
+    try:
+        # 1. Run semantic safety guardrail
+        from app.modules.guardrails.service import is_command_safe
+        is_safe, warning, similarity = is_command_safe(command)
+        if not is_safe:
+            return f"Execution Blocked by Guardrail: {warning} (similarity index: {similarity:.2f})"
 
-    # 2. Enforce human verification for state-modifying actions
-    if is_write_command(command):
-        action_id = f"act_{uuid.uuid4().hex[:12]}"
-        sess_id = active_session_id.get()
+        # 2. Enforce human verification for state-modifying actions
+        if is_write_command(command):
+            action_id = f"act_{uuid.uuid4().hex[:12]}"
+            sess_id = active_session_id.get()
+            owner_id = active_owner_id.get()
+            
+            async with async_session_maker() as session:
+                # Check server ownership
+                try:
+                    # Check if server_id is an integer or digit string
+                    is_id = False
+                    if isinstance(server_id, int):
+                        is_id = True
+                    elif isinstance(server_id, str) and server_id.isdigit():
+                        is_id = True
+                        server_id = int(server_id)
+                        
+                    if is_id:
+                        server = await servers_service.get_server_by_id(session, server_id, owner_id)
+                    else:
+                        server = await servers_service.get_server_by_name(session, str(server_id), owner_id)
+                except Exception:
+                    return f"Error: Server '{server_id}' not found or permission denied."
+                
+                # Record the pending action in database
+                action = AgentAction(
+                    id=action_id,
+                    session_id=sess_id,
+                    server_id=server.id,
+                    command=command,
+                    status="pending"
+                )
+                session.add(action)
+                await session.commit()
+                
+            # Emit approval notification to WebSocket client
+            ws = active_websocket.get()
+            await ws.send_json({
+                "type": "approval_required",
+                "action_id": action_id,
+                "server_name": server.name,
+                "command": command
+            })
+            
+            # Return special status string to halt agent execution loop
+            return f"PAUSED: REQUIRES_APPROVAL: {action_id}"
+
+        # 3. Safe read-only execution: connect and stream output line-by-line
         owner_id = active_owner_id.get()
-        
         async with async_session_maker() as session:
-            # Check server ownership
             try:
-                server = await servers_service.get_server_by_id(session, server_id, owner_id)
+                # Check if server_id is an integer or digit string
+                is_id = False
+                if isinstance(server_id, int):
+                    is_id = True
+                elif isinstance(server_id, str) and server_id.isdigit():
+                    is_id = True
+                    server_id = int(server_id)
+                    
+                if is_id:
+                    server = await servers_service.get_server_by_id(session, server_id, owner_id)
+                else:
+                    server = await servers_service.get_server_by_name(session, str(server_id), owner_id)
             except Exception:
-                return f"Error: Server with ID {server_id} not found or permission denied."
-            
-            # Record the pending action in database
-            action = AgentAction(
-                id=action_id,
-                session_id=sess_id,
-                server_id=server_id,
-                command=command,
-                status="pending"
-            )
-            session.add(action)
-            await session.commit()
-            
-        # Emit approval notification to WebSocket client
+                return f"Error: Server '{server_id}' not found."
+
+        credential = decrypt_data(server.encrypted_credential)
+        conn_args = {
+            "host": server.ip_address,
+            "port": server.ssh_port,
+            "username": server.ssh_username,
+            "known_hosts": None,
+        }
+        
+        if server.ssh_auth_type == "password":
+            conn_args["password"] = credential
+        else:
+            try:
+                conn_args["client_keys"] = [asyncssh.import_private_key(credential)]
+            except Exception as e:
+                return f"Error: Invalid SSH private key format: {str(e)}"
+
         ws = active_websocket.get()
         await ws.send_json({
-            "type": "approval_required",
-            "action_id": action_id,
-            "server_name": server.name,
-            "command": command
+            "type": "stdout",
+            "data": f"\n[Executing on {server.name}]: {command}\n"
         })
-        
-        # Return special status string to halt agent execution loop
-        return f"PAUSED: REQUIRES_APPROVAL: {action_id}"
 
-    # 3. Safe read-only execution: connect and stream output line-by-line
-    owner_id = active_owner_id.get()
-    async with async_session_maker() as session:
-        try:
-            server = await servers_service.get_server_by_id(session, server_id, owner_id)
-        except Exception:
-            return f"Error: Server with ID {server_id} not found."
+        stdout_accumulated = []
+        stderr_accumulated = []
 
-    credential = decrypt_data(server.encrypted_credential)
-    conn_args = {
-        "host": server.ip_address,
-        "port": server.ssh_port,
-        "username": server.ssh_username,
-        "known_hosts": None,
-    }
-    
-    if server.ssh_auth_type == "password":
-        conn_args["password"] = credential
-    else:
-        conn_args["client_keys"] = [asyncssh.import_private_key(credential)]
-
-    ws = active_websocket.get()
-    await ws.send_json({
-        "type": "stdout",
-        "data": f"\n[Executing on {server.name}]: {command}\n"
-    })
-
-    stdout_accumulated = []
-    stderr_accumulated = []
-
-    try:
         async with asyncssh.connect(**conn_args) as conn:
             async with conn.create_process(command) as process:
                 # Stream stdout line-by-line
                 async for line in process.stdout:
+                    if isinstance(line, bytes):
+                        line = line.decode("utf-8", errors="replace")
                     stdout_accumulated.append(line)
                     await ws.send_json({"type": "stdout", "data": line})
                 
                 # Stream stderr line-by-line
                 async for line in process.stderr:
+                    if isinstance(line, bytes):
+                        line = line.decode("utf-8", errors="replace")
                     stderr_accumulated.append(line)
                     await ws.send_json({"type": "stderr", "data": line})
                 
@@ -217,7 +246,7 @@ async def execute_ssh_command(server_id: int, command: str) -> str:
                 stderr_str = "".join(stderr_accumulated)
                 return f"Exit Code: {exit_code}\nStdout:\n{stdout_str}\nStderr:\n{stderr_str}"
     except Exception as e:
-        return f"SSH Connection Failed to {server.ip_address}: {str(e)}"
+        return f"Tool Execution Error: {str(e)}"
 
 # Define list of tools available to the Agent
 tools = [list_available_servers, execute_ssh_command]
