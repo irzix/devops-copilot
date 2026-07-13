@@ -5,10 +5,13 @@ An open-source, AI-driven DevOps Agent and CLI Client designed to manage raw roo
 ---
 
 ## Key Features
-- **Semantic Guardrails:** Uses local **ChromaDB** to intercept and block dangerous terminal commands before execution.
-- **Human-in-the-Loop (HITL):** Enforces admin approval (`[y/N]`) inside the terminal for any state-modifying actions (e.g. system service restarts).
-- **Real-Time Streaming:** Streams LLM thoughts and active SSH `stdout`/`stderr` line-by-line using WebSockets.
+- **Lean RAG Knowledge Base:** Automatically chunks and indexes executed SSH command outputs, logs, and server configs into separate **ChromaDB** collections, enabling the agent to search past server history before executing new commands.
+- **Semantic Guardrails:** Uses local vector search to intercept and block dangerous terminal commands.
+- **Human-in-the-Loop (HITL):** Enforces admin approval (`[y/N]`) inside the terminal for any state-modifying actions with clean prompt synchronization.
+- **CLI Connection Resilience:** Automatically reconnects to the WebSocket server using exponential backoff if the network drops or the server restarts.
+- **Real-Time Streaming:** Streams LLM thoughts and active SSH `stdout`/`stderr` line-by-line using WebSockets with 30s execution timeouts.
 - **Encrypted Credentials:** Securely encrypts passwords and SSH private keys using Fernet (AES-256).
+- **Server & Session CRUD:** Full REST API support for updating/deleting server connections and deleting chat sessions (with cascade cleanup).
 - **Flexible AI Models:** Powered by **OpenRouter** (supports Llama 3, Gemini, GPT, etc.).
 
 ---
