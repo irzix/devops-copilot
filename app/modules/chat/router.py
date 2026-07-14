@@ -20,7 +20,7 @@ from app.modules.chat.schema import (
     ChatMessageFeedbackRequest,
     AgentActionResponse
 )
-from app.modules.memory.reflexion import reflexion_pipeline
+from app.modules.memory.reflexion import reflect_on_negative_feedback
 from app.modules.chat.agent import (
     create_agent_executor,
     get_llm,
@@ -145,11 +145,11 @@ async def submit_message_feedback(
     # 4. Trigger reflexion background task if rating is negative
     if payload.feedback_rating == "negative":
         background_tasks.add_task(
-            reflexion_pipeline.reflect_on_negative_feedback,
+            reflect_on_negative_feedback,
             session_id=session_id,
             message_id=message_id,
             user_comment=payload.feedback_comment or "",
-            owner_id=current_user.id
+            owner_id=current_user.id,
         )
 
     return chat_message

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from pydantic import BaseModel, Field
 
 class ChatSessionCreate(BaseModel):
@@ -14,8 +15,6 @@ class ChatSessionResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-from typing import Optional
 
 class ChatMessageResponse(BaseModel):
     """Metadata response representing a single message in a session thread."""
