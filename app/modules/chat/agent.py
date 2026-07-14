@@ -583,12 +583,31 @@ async def evaluator_node(state: AgentState) -> dict:
     """
     Inspects the outcomes of tool executions.
     If a tool failed (e.g. non-zero exit code or error output), and retry_count < 3,
-    we can flag it for self-correction.
+    routes back to agent_node for self-correction.
+    
+    IMPORTANT: Terminal infrastructure errors (SSH connection refused, auth failure,
+    timeouts) are NOT retryable — they cannot be fixed by rephrasing the command.
+    These pass straight through to write_memory.
     """
     retry_count = state.get("retry_count", 0)
     messages = state["messages"]
     
-    # Get the last batch of ToolMessages
+    # Errors that indicate an infrastructure problem, not a fixable command logic error.
+    # Self-correction is pointless for these — the agent should just report them.
+    NON_RETRYABLE_PATTERNS = [
+        "Connection refused",
+        "Connection timed out",
+        "No route to host",
+        "Network is unreachable",
+        "SSH Execution Failed",
+        "Authentication failed",
+        "Permission denied (publickey",
+        "Host key verification failed",
+        "Name or service not known",
+        "PAUSED: REQUIRES_APPROVAL",  # Interrupted by human-in-the-loop — not an error
+    ]
+    
+    # Get the last batch of ToolMessages (everything after the last non-tool message)
     last_tool_messages = []
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
@@ -597,11 +616,21 @@ async def evaluator_node(state: AgentState) -> dict:
             break
             
     has_failure = False
+    is_terminal_error = False
     failure_details = []
     
     for msg in last_tool_messages:
         content = str(msg.content)
         is_fail = False
+        
+        # First check if this is a non-retryable infrastructure error
+        for pattern in NON_RETRYABLE_PATTERNS:
+            if pattern in content:
+                is_terminal_error = True
+                break
+        
+        if is_terminal_error:
+            break
         
         # Check for non-zero exit code in bash execution outputs
         if "Exit Code:" in content:
@@ -620,7 +649,8 @@ async def evaluator_node(state: AgentState) -> dict:
             has_failure = True
             failure_details.append(f"Tool '{msg.name}' failed: {content}")
             
-    if has_failure and retry_count < 3:
+    # Only attempt self-correction for logic/command errors, not infrastructure failures
+    if has_failure and not is_terminal_error and retry_count < 3:
         new_retry_count = retry_count + 1
         feedback_msg = (
             f"ATTENTION: A tool call failed. Please inspect the error and try to correct it "
