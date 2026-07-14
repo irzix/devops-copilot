@@ -7,13 +7,20 @@ from app.modules.servers.router import router as servers_router
 from app.modules.guardrails.service import init_and_seed_db
 from app.modules.chat.router import router as chat_router
 
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from app.modules.chat.agent import build_graph
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create DB tables on startup
     await create_db_and_tables()
     # Initialize and seed ChromaDB local vector store
     await init_and_seed_db()
-    yield
+    
+    # Initialize SQLite checkpointer for LangGraph
+    async with AsyncSqliteSaver.from_conn_string("data/devops_rag.db") as checkpointer:
+        app.state.graph = build_graph(checkpointer=checkpointer)
+        yield
 
 app = FastAPI(
     title="DevOps-Copilot API",

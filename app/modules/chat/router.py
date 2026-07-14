@@ -22,14 +22,15 @@ from app.modules.chat.schema import (
 from app.modules.chat.agent import (
     create_agent_executor,
     get_llm,
-    inject_experiential_memory,
     StreamingCallbackHandler,
     active_websocket,
     active_session_id,
     active_owner_id,
     decrypt_data,
-    asyncssh
+    asyncssh,
 )
+from langgraph.types import Command
+from app.modules.memory.types import AgentState
 from app.modules.knowledge.service import index_lesson_learned, index_command_output
 
 router = APIRouter()
@@ -211,6 +212,9 @@ async def websocket_endpoint(
             # Receive inbound JSON payloads
             data = await websocket.receive_json()
             msg_type = data.get("type")
+            
+            # Access the compiled graph from FastAPI app state
+            graph = websocket.app.state.graph
 
             if msg_type == "message":
                 session_id = data.get("session_id")
@@ -219,7 +223,7 @@ async def websocket_endpoint(
                 if not session_id or not content:
                     continue
 
-                # 2. Load conversation history for memory injection
+                # 2. Save user message in DB
                 async with async_session_maker() as db_session:
                     # Verify session ownership
                     sess_stmt = select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user.id)
@@ -233,52 +237,49 @@ async def websocket_endpoint(
                     db_session.add(user_msg)
                     await db_session.commit()
 
-                    # Fetch history
-                    history_stmt = select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at.asc())
-                    history_result = await db_session.exec(history_stmt)
-                    db_messages = history_result.all()
-
-                chat_history = []
-                # Map history database records to LangChain Human/AI message formats
-                for msg in db_messages[:-1]:  # Exclude current message since it is input
-                    if msg.sender == "user":
-                        chat_history.append(HumanMessage(content=msg.content))
-                    else:
-                        chat_history.append(AIMessage(content=msg.content))
-
                 # 3. Setup context variables for the SSH execution tools
                 ws_token = active_websocket.set(websocket)
                 sess_token = active_session_id.set(session_id)
                 owner_token = active_owner_id.set(user.id)
 
                 try:
-                    # Stream tokens via custom callback handler
-                    callback = StreamingCallbackHandler(websocket)
-                    agent_executor = create_agent_executor(callbacks=[callback])
-
-                    # Auto-inject Experiential Learning memory into context if matches exist
-                    enriched_content = inject_experiential_memory(content)
-
-                    # Invoke agent compiled StateGraph using messages schema
-                    inputs = {
-                        "messages": chat_history + [HumanMessage(content=enriched_content)]
+                    config = {
+                        "configurable": {
+                            "thread_id": str(session_id)
+                        },
+                        "callbacks": [StreamingCallbackHandler(websocket)]
                     }
-                    agent_response = await agent_executor.ainvoke(inputs)
 
-                    # Extract final text from output message list
-                    ai_text = agent_response["messages"][-1].content
-                    
-                    # Record final agent response in database
-                    async with async_session_maker() as db_session:
-                        ai_msg = ChatMessage(session_id=session_id, sender="ai", content=ai_text)
-                        db_session.add(ai_msg)
-                        await db_session.commit()
+                    # Determine inputs based on whether graph thread state already exists
+                    thread_state = await graph.aget_state(config)
+                    if thread_state.values:
+                        inputs = {"messages": [HumanMessage(content=content)]}
+                    else:
+                        inputs = {
+                            "messages": [HumanMessage(content=content)],
+                            "owner_id": user.id,
+                            "session_id": session_id
+                        }
 
-                    # Notify client execution complete
-                    await websocket.send_json({
-                        "type": "finished",
-                        "data": ai_text
-                    })
+                    # Run LangGraph StateGraph agent
+                    agent_response = await graph.ainvoke(inputs, config=config)
+
+                    # Check if thread is currently suspended/paused
+                    thread_state = await graph.aget_state(config)
+                    if not thread_state.next:
+                        ai_text = agent_response["messages"][-1].content
+                        
+                        # Record final agent response in database
+                        async with async_session_maker() as db_session:
+                            ai_msg = ChatMessage(session_id=session_id, sender="ai", content=ai_text)
+                            db_session.add(ai_msg)
+                            await db_session.commit()
+
+                        # Notify client execution complete
+                        await websocket.send_json({
+                            "type": "finished",
+                            "data": ai_text
+                        })
 
                 except Exception as e:
                     await websocket.send_json({"type": "error", "data": f"Agent Execution Error: {str(e)}"})
@@ -317,119 +318,74 @@ async def websocket_endpoint(
                             "type": "stdout",
                             "data": f"\n[Action {action_id} Rejected by User]\n"
                         })
+                        
+                        # Resume graph execution with approved=False to exit execution
+                        ws_token = active_websocket.set(websocket)
+                        sess_token = active_session_id.set(action.session_id)
+                        owner_token = active_owner_id.set(user.id)
+                        try:
+                            config = {
+                                "configurable": {"thread_id": str(action.session_id)},
+                                "callbacks": [StreamingCallbackHandler(websocket)]
+                            }
+                            agent_response = await graph.ainvoke(Command(resume={"approved": False}), config=config)
+                            
+                            # If graph finishes, save the final AI message
+                            thread_state = await graph.aget_state(config)
+                            if not thread_state.next:
+                                ai_text = agent_response["messages"][-1].content
+                                async with async_session_maker() as db_session2:
+                                    ai_msg = ChatMessage(session_id=action.session_id, sender="ai", content=ai_text)
+                                    db_session2.add(ai_msg)
+                                    await db_session2.commit()
+                                await websocket.send_json({"type": "finished", "data": ai_text})
+                        finally:
+                            active_websocket.reset(ws_token)
+                            active_session_id.reset(sess_token)
+                            active_owner_id.reset(owner_token)
                         continue
 
                     # If approved, update status
                     action.status = "approved"
                     await db_session.commit()
 
-                    # Load targeted server config
-                    server_stmt = select(Server).where(Server.id == action.server_id)
-                    srv_result = await db_session.exec(server_stmt)
-                    server = srv_result.first()
-
                 await websocket.send_json({
                     "type": "stdout",
-                    "data": f"\n[Action {action_id} Approved] Running command on {server.name}...\n"
+                    "data": f"\n[Action {action_id} Approved] Resuming execution...\n"
                 })
 
-                # 4. Decrypt and execute approved write command
-                credential = decrypt_data(server.encrypted_credential)
-                conn_args = {
-                    "host": server.ip_address,
-                    "port": server.ssh_port,
-                    "username": server.ssh_username,
-                    "known_hosts": None
-                }
-                if server.ssh_auth_type == "password":
-                    conn_args["password"] = credential
-                else:
-                    conn_args["client_keys"] = [asyncssh.import_private_key(credential)]
-
-                stdout_accumulated = []
-                stderr_accumulated = []
-                exit_status = -1
+                # Setup context variables
+                ws_token = active_websocket.set(websocket)
+                sess_token = active_session_id.set(action.session_id)
+                owner_token = active_owner_id.set(user.id)
 
                 try:
-                    # Connect and execute process, streaming stdout/stderr line-by-line
-                    async with asyncssh.connect(**conn_args) as conn:
-                        async with conn.create_process(action.command) as process:
-                            async for line in process.stdout:
-                                if isinstance(line, bytes):
-                                    line = line.decode("utf-8", errors="replace")
-                                stdout_accumulated.append(line)
-                                await websocket.send_json({"type": "stdout", "data": line})
-                            async for line in process.stderr:
-                                if isinstance(line, bytes):
-                                    line = line.decode("utf-8", errors="replace")
-                                stderr_accumulated.append(line)
-                                await websocket.send_json({"type": "stderr", "data": line})
-                            exit_status = await process.wait()
-                            exit_code = exit_status.exit_status if exit_status.exit_status is not None else 0
+                    config = {
+                        "configurable": {"thread_id": str(action.session_id)},
+                        "callbacks": [StreamingCallbackHandler(websocket)]
+                    }
+                    # Resume execution with approved=True
+                    agent_response = await graph.ainvoke(Command(resume={"approved": True}), config=config)
 
-                    await websocket.send_json({
-                        "type": "stdout",
-                        "data": f"[Process finished with code {exit_code}]\n"
-                    })
-
-                    stdout_str = "".join(stdout_accumulated)
-                    stderr_str = "".join(stderr_accumulated)
-
-                    # Auto-index approved command output into RAG knowledge base
-                    try:
-                        index_command_output(server.name, action.command, stdout_str, stderr_str, exit_code)
-                    except Exception:
-                        pass
-
-                    # 5. Invoke agent loop with the execution output
-                    ws_token = active_websocket.set(websocket)
-                    sess_token = active_session_id.set(action.session_id)
-                    owner_token = active_owner_id.set(user.id)
-
-                    try:
-                        callback = StreamingCallbackHandler(websocket)
-                        agent_executor = create_agent_executor(callbacks=[callback])
-
-                        # Feed output back to agent reasoning chain
-                        resume_prompt = (
-                            f"User approved execution of action '{action_id}'.\n"
-                            f"Command '{action.command}' executed on server '{server.name}'.\n"
-                            f"Exit Code: {exit_code}\n"
-                            f"Stdout:\n{stdout_str}\n"
-                            f"Stderr:\n{stderr_str}\n\n"
-                            f"Please analyze these outputs and provide your final response to the user."
-                        )
-
-                        # Auto-inject Experiential Learning memory into resume prompt
-                        enriched_resume = inject_experiential_memory(resume_prompt)
-
-                        # Invoke the agent graph with the resume message
-                        agent_response = await agent_executor.ainvoke({
-                            "messages": [HumanMessage(content=enriched_resume)]
-                        })
-
+                    # If graph finishes, save final AI message
+                    thread_state = await graph.aget_state(config)
+                    if not thread_state.next:
                         ai_text = agent_response["messages"][-1].content
-                        
-                        # Save final summary response in database
-                        async with async_session_maker() as db_session:
+                        async with async_session_maker() as db_session3:
                             ai_msg = ChatMessage(session_id=action.session_id, sender="ai", content=ai_text)
-                            db_session.add(ai_msg)
-                            await db_session.commit()
+                            db_session3.add(ai_msg)
+                            await db_session3.commit()
 
                         await websocket.send_json({
                             "type": "finished",
                             "data": ai_text
                         })
-
-                    except Exception as e:
-                        await websocket.send_json({"type": "error", "data": f"Error during agent completion: {str(e)}"})
-                    finally:
-                        active_websocket.reset(ws_token)
-                        active_session_id.reset(sess_token)
-                        active_owner_id.reset(owner_token)
-
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "data": f"SSH Execution Failed: {str(e)}"})
+                    await websocket.send_json({"type": "error", "data": f"Error resuming execution: {str(e)}"})
+                finally:
+                    active_websocket.reset(ws_token)
+                    active_session_id.reset(sess_token)
+                    active_owner_id.reset(owner_token)
 
     except WebSocketDisconnect:
         pass
