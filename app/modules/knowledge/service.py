@@ -27,8 +27,10 @@ def _chunk_text(text: str) -> List[str]:
     return chunks
 
 
+import time
+
 def index_command_output(
-    server_name: str, command: str, stdout: str, stderr: str, exit_code: int
+    server_name: str, command: str, stdout: str, stderr: str, exit_code: int, owner_id: Optional[int] = None
 ):
     """Auto-index SSH command execution results into command_history collection."""
     doc = (
@@ -43,7 +45,11 @@ def index_command_output(
         "command": command,
         "exit_code": exit_code,
         "source": "command_history",
+        "timestamp": time.time(),
     }
+    if owner_id is not None:
+        metadata["owner_id"] = owner_id
+        
     chunks = _chunk_text(doc)
     for i, chunk in enumerate(chunks):
         command_history.add(
@@ -53,13 +59,17 @@ def index_command_output(
         )
 
 
-def index_log(server_name: str, log_source: str, content: str):
+def index_log(server_name: str, log_source: str, content: str, owner_id: Optional[int] = None):
     """Index server log output into server_logs collection."""
     metadata = {
         "server_name": server_name,
         "log_source": log_source,
         "source": "server_logs",
+        "timestamp": time.time(),
     }
+    if owner_id is not None:
+        metadata["owner_id"] = owner_id
+        
     chunks = _chunk_text(content)
     for i, chunk in enumerate(chunks):
         server_logs.add(
@@ -69,13 +79,17 @@ def index_log(server_name: str, log_source: str, content: str):
         )
 
 
-def index_config(server_name: str, file_path: str, content: str):
+def index_config(server_name: str, file_path: str, content: str, owner_id: Optional[int] = None):
     """Index a server config file into server_configs collection."""
     metadata = {
         "server_name": server_name,
         "file_path": file_path,
         "source": "server_configs",
+        "timestamp": time.time(),
     }
+    if owner_id is not None:
+        metadata["owner_id"] = owner_id
+        
     chunks = _chunk_text(content)
     for i, chunk in enumerate(chunks):
         server_configs.add(
@@ -91,7 +105,8 @@ def index_lesson_learned(
     real_cause: str,
     what_didnt_work: str,
     what_worked: str,
-    time_to_resolve: str
+    time_to_resolve: str,
+    owner_id: Optional[int] = None
 ):
     """Index a structured post-incident postmortem (Experiential Learning / ExpeL) into lessons_learned."""
     doc = (
@@ -108,7 +123,11 @@ def index_lesson_learned(
         "what_worked": what_worked,
         "time_to_resolve": time_to_resolve,
         "source": "lessons_learned",
+        "timestamp": time.time(),
     }
+    if owner_id is not None:
+        metadata["owner_id"] = owner_id
+        
     lessons_learned.add(
         ids=[f"lsn_{uuid.uuid4().hex[:12]}"],
         documents=[doc],
@@ -116,12 +135,17 @@ def index_lesson_learned(
     )
 
 
-def search_lessons_learned(query: str, n_results: int = 3) -> str:
+def search_lessons_learned(query: str, n_results: int = 3, owner_id: Optional[int] = None) -> str:
     """Semantic search specifically across structured past lessons learned."""
     if lessons_learned.count() == 0:
         return "No lessons learned recorded yet in the vector database."
     
-    results = lessons_learned.query(query_texts=[query], n_results=min(n_results, lessons_learned.count()))
+    where_clause = {"owner_id": owner_id} if owner_id is not None else None
+    results = lessons_learned.query(
+        query_texts=[query], 
+        where=where_clause,
+        n_results=min(n_results, lessons_learned.count())
+    )
     if not results or not results["documents"] or not results["documents"][0]:
         return "No matching lessons learned found."
     
@@ -147,6 +171,7 @@ def search(
     query: str,
     collection_names: Optional[List[str]] = None,
     n_results: int = 3,
+    owner_id: Optional[int] = None,
 ) -> str:
     """
     Semantic search across one or more knowledge collections.
@@ -154,12 +179,17 @@ def search(
     """
     targets = collection_names or list(_COLLECTIONS.keys())
     all_results = []
+    where_clause = {"owner_id": owner_id} if owner_id is not None else None
 
     for name in targets:
         col = _COLLECTIONS.get(name)
         if not col or col.count() == 0:
             continue
-        results = col.query(query_texts=[query], n_results=min(n_results, col.count()))
+        results = col.query(
+            query_texts=[query], 
+            where=where_clause,
+            n_results=min(n_results, col.count())
+        )
         if results and results["documents"]:
             for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
                 all_results.append(
