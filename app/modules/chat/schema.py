@@ -15,16 +15,25 @@ class ChatSessionResponse(BaseModel):
     class Config:
         from_attributes = True
 
+from typing import Optional
+
 class ChatMessageResponse(BaseModel):
     """Metadata response representing a single message in a session thread."""
     id: int
     session_id: int
     sender: str
     content: str
+    feedback_rating: Optional[str] = None
+    feedback_comment: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+class ChatMessageFeedbackRequest(BaseModel):
+    """Request payload to submit message feedback."""
+    feedback_rating: str = Field(..., min_length=1, max_length=50)
+    feedback_comment: Optional[str] = Field(default=None, max_length=1000)
 
 class AgentActionResponse(BaseModel):
     """Metadata response representing a queued server command approval."""

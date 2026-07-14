@@ -24,6 +24,10 @@ class ChatMessage(SQLModel, table=True):
     # Either "user" or "ai"
     sender: str = Field(index=True, nullable=False)
     content: str = Field(nullable=False)
+    # Optional user feedback on the message
+    feedback_rating: Optional[str] = Field(default=None, nullable=True) # "positive", "negative", or rating score
+    feedback_comment: Optional[str] = Field(default=None, nullable=True)
+    
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         nullable=False

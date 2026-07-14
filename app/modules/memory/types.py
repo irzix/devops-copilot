@@ -8,6 +8,7 @@ class AgentState(TypedDict):
     memory_context: str
     owner_id: int
     session_id: int
+    retry_count: int
 
 class ExtractedFact(BaseModel):
     fact_type: Literal["preference", "server_fact", "relationship", "incident"]
