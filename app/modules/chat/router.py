@@ -1,6 +1,6 @@
 import jwt
 import json
-from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query, BackgroundTasks
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -17,8 +17,10 @@ from app.modules.chat.schema import (
     ChatSessionCreate,
     ChatSessionResponse,
     ChatMessageResponse,
+    ChatMessageFeedbackRequest,
     AgentActionResponse
 )
+from app.modules.memory.reflexion import reflexion_pipeline
 from app.modules.chat.agent import (
     create_agent_executor,
     get_llm,
@@ -109,6 +111,48 @@ async def delete_session(
     await session.delete(chat_session)
     await session.commit()
     return {"status": "success", "message": f"Chat session {session_id} deleted successfully"}
+
+@router.post("/sessions/{session_id}/messages/{message_id}/feedback", response_model=ChatMessageResponse)
+async def submit_message_feedback(
+    session_id: int,
+    message_id: int,
+    payload: ChatMessageFeedbackRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Submit user satisfaction rating (e.g. 'positive' / 'negative') and comments for a message."""
+    # 1. Verify session ownership
+    sess_statement = select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == current_user.id)
+    sess_result = await session.exec(sess_statement)
+    if not sess_result.first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+
+    # 2. Get message
+    msg_statement = select(ChatMessage).where(ChatMessage.id == message_id, ChatMessage.session_id == session_id)
+    msg_result = await session.exec(msg_statement)
+    chat_message = msg_result.first()
+    if not chat_message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    # 3. Save feedback
+    chat_message.feedback_rating = payload.feedback_rating
+    chat_message.feedback_comment = payload.feedback_comment
+    session.add(chat_message)
+    await session.commit()
+    await session.refresh(chat_message)
+
+    # 4. Trigger reflexion background task if rating is negative
+    if payload.feedback_rating == "negative":
+        background_tasks.add_task(
+            reflexion_pipeline.reflect_on_negative_feedback,
+            session_id=session_id,
+            message_id=message_id,
+            user_comment=payload.feedback_comment or "",
+            owner_id=current_user.id
+        )
+
+    return chat_message
 
 @router.post("/sessions/{session_id}/postmortem")
 async def generate_postmortem(
