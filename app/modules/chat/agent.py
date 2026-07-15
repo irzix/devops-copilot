@@ -1,4 +1,5 @@
 import re
+import hashlib
 import uuid
 import asyncio
 import contextvars
@@ -144,7 +145,11 @@ async def execute_ssh_command(server_id: int | str, command: str) -> str:
         if is_write_command(command):
             try:
                 # Use the active tool_call_id to make the action_id deterministic across graph resumes
-                action_id = f"act_{active_tool_call_id.get().replace('-', '')[:12]}"
+                # Hash the full string because LangChain IDs might start with the identical tool name 
+                # (e.g. 'tool_execute_ssh_command_xxx') and slicing [:12] strips the unique entropy
+                tool_id = active_tool_call_id.get()
+                hashed_id = hashlib.md5(tool_id.encode('utf-8')).hexdigest()[:12]
+                action_id = f"act_{hashed_id}"
             except LookupError:
                 action_id = f"act_{uuid.uuid4().hex[:12]}"
 
