@@ -84,15 +84,15 @@ async def run_chat_loop(server_url: str, token: str, session_id: int):
                     if not user_input.strip():
                         continue
 
-                        # Send chat message to server using websockets API (send stringified JSON)
-                        await ws.send(json.dumps({
-                            "type": "message",
-                            "session_id": session_id,
-                            "content": user_input
-                        }))
+                    # Send chat message to server using websockets API (send stringified JSON)
+                    await ws.send(json.dumps({
+                        "type": "message",
+                        "session_id": session_id,
+                        "content": user_input
+                    }))
 
-                        # Listen to streamed server events
-                        typer.secho("Agent: ", fg=typer.colors.MAGENTA, nl=False)
+                    # Listen to streamed server events
+                    typer.secho("Agent: ", fg=typer.colors.MAGENTA, nl=False)
                     while True:
                         event = await ws.recv()
                         event_data = json.loads(event)
