@@ -74,17 +74,15 @@ async def run_chat_loop(server_url: str, token: str, session_id: int):
                 typer.secho(f"\nConnected to DevOps AI Agent (Session #{session_id})!", fg=typer.colors.GREEN, bold=True)
                 typer.secho("Type your prompt and press Enter. Type 'exit' to quit.\n", fg=typer.colors.CYAN)
 
-                approval_sent = False
                 while True:
-                    if not approval_sent:
-                        # Read user input from terminal
-                        user_input = typer.prompt("You")
-                        if user_input.lower() in ("exit", "quit"):
-                            typer.secho("Exiting chat session. Goodbye!", fg=typer.colors.YELLOW)
-                            return
-                        
-                        if not user_input.strip():
-                            continue
+                    # Read user input from terminal
+                    user_input = typer.prompt("You")
+                    if user_input.lower() in ("exit", "quit"):
+                        typer.secho("Exiting chat session. Goodbye!", fg=typer.colors.YELLOW)
+                        return
+                    
+                    if not user_input.strip():
+                        continue
 
                         # Send chat message to server using websockets API (send stringified JSON)
                         await ws.send(json.dumps({
@@ -95,9 +93,6 @@ async def run_chat_loop(server_url: str, token: str, session_id: int):
 
                         # Listen to streamed server events
                         typer.secho("Agent: ", fg=typer.colors.MAGENTA, nl=False)
-                    
-                    approval_sent = False  # Reset state for this turn
-                    
                     while True:
                         event = await ws.recv()
                         event_data = json.loads(event)
@@ -144,7 +139,6 @@ async def run_chat_loop(server_url: str, token: str, session_id: int):
                                     "type": "reject",
                                     "action_id": action_id
                                 }))
-                            approval_sent = True
 
                         elif event_type == "finished":
                             # Output generation is completed
