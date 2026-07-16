@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevOps Copilot</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css?v=2">
+    <!-- Alpine.js & Marked.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/js/app.js?v=2"></script>
+</head>
+<body x-data="app">
+    
+    {% block layout %}
+    <div class="sidebar">
+        <div class="sidebar-logo">🚀 DevOps Copilot</div>
+        <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
+        <a href="/chat" class="nav-link {% if request.url.path == '/chat' %}active{% endif %}">Chat Console</a>
+        <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">Settings</a>
+        <div style="flex:1"></div>
+        <a href="#" @click.prevent="logout" class="nav-link">Logout</a>
+    </div>
+
+    <div class="main-content">
+        <div class="header">
+            <div><strong>{% block page_title %}{% endblock %}</strong></div>
+            <div class="flex items-center">
+                <button @click="toggleTheme" class="btn btn-sm" style="background:var(--bg-input);color:var(--text-main);margin-right:1rem;">
+                    <span x-text="theme === 'dark' ? '☀️ Light' : '🌙 Dark'"></span>
+                </button>
+            </div>
+        </div>
+
+        <div class="content-body">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+    {% endblock %}
+    
+</body>
+</html>

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block page_title %}Settings & Notifications{% endblock %}
+
+{% block content %}
+<div class="card" x-data="{
+    channels: [],
+    loading: true,
+    newChannel: { name: '', channel_type: 'telegram', bot_token: '', chat_id: '', webhook_url: '' },
+    
+    async init() {
+        await this.loadChannels();
+    },
+    
+    async loadChannels() {
+        const res = await this.apiFetch('/api/v1/notifications/');
+        if (res.ok) {
+            this.channels = await res.json();
+        }
+        this.loading = false;
+    },
+    
+    async addChannel() {
+        const payload = { ...this.newChannel };
+        const res = await this.apiFetch('/api/v1/notifications/', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+            this.newChannel = { name: '', channel_type: 'telegram', bot_token: '', chat_id: '', webhook_url: '' };
+            await this.loadChannels();
+        } else {
+            alert('Failed to add channel');
+        }
+    },
+    
+    async deleteChannel(id) {
+        if(confirm('Delete this channel?')) {
+            await this.apiFetch('/api/v1/notifications/' + id, { method: 'DELETE' });
+            await this.loadChannels();
+        }
+    },
+
+    async testChannel(id) {
+        const res = await this.apiFetch(`/api/v1/notifications/${id}/test`, {
+            method: 'POST',
+            body: JSON.stringify({ message: '👋 Test from DevOps Copilot' })
+        });
+        if (res.ok) alert('Test sent successfully!');
+        else alert('Failed to send test. Check logs.');
+    }
+}">
+    <h3>Notification Channels</h3>
+    <p class="text-muted">Configure where alerts and incidents should be sent.</p>
+    
+    <div x-show="loading">Loading...</div>
+    
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 2rem;" x-show="!loading && channels.length > 0">
+        <thead>
+            <tr style="border-bottom: 1px solid var(--border); text-align: left;">
+                <th style="padding: 0.5rem;">Name</th>
+                <th style="padding: 0.5rem;">Type</th>
+                <th style="padding: 0.5rem;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <template x-for="ch in channels" :key="ch.id">
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 0.5rem;" x-text="ch.name"></td>
+                    <td style="padding: 0.5rem;" x-text="ch.channel_type"></td>
+                    <td style="padding: 0.5rem;">
+                        <button class="btn btn-sm" @click="testChannel(ch.id)">Test</button>
+                        <button class="btn btn-sm" style="background:var(--danger);" @click="deleteChannel(ch.id)">Delete</button>
+                    </td>
+                </tr>
+            </template>
+        </tbody>
+    </table>
+    
+    <div x-show="!loading && channels.length === 0" class="text-muted mb-4">No channels configured.</div>
+
+    <div style="border-top: 1px solid var(--border); padding-top: 1.5rem;">
+        <h4>Add New Channel</h4>
+        <div class="grid-3">
+            <div>
+                <label>Name</label>
+                <input type="text" x-model="newChannel.name" class="form-control" placeholder="e.g. My Slack">
+            </div>
+            <div>
+                <label>Type</label>
+                <select x-model="newChannel.channel_type" class="form-control" style="height: 50px;">
+                    <option value="telegram">Telegram</option>
+                    <option value="slack">Slack</option>
+                    <option value="discord">Discord</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="mt-4 grid-3" x-show="newChannel.channel_type === 'telegram'">
+            <div>
+                <label>Bot Token</label>
+                <input type="text" x-model="newChannel.bot_token" class="form-control">
+            </div>
+            <div>
+                <label>Chat ID</label>
+                <input type="text" x-model="newChannel.chat_id" class="form-control">
+            </div>
+        </div>
+        
+        <div class="mt-4 grid-3" x-show="newChannel.channel_type !== 'telegram'">
+            <div style="grid-column: span 2;">
+                <label>Webhook URL</label>
+                <input type="text" x-model="newChannel.webhook_url" class="form-control">
+            </div>
+        </div>
+        
+        <button class="btn mt-4" @click="addChannel">Add Channel</button>
+    </div>
+</div>
+{% endblock %}

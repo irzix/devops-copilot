@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block page_title %}Agent Chat Console{% endblock %}
+
+{% block content %}
+<style>
+    /* Remove padding from content-body just for the chat page so it fills the screen perfectly */
+    .content-body { padding: 0 !important; display: flex; flex-direction: column; }
+    .chat-layout { height: 100% !important; flex: 1; border-top: none; }
+</style>
+<div class="chat-layout" x-data="chat">
+    <!-- Sidebar for Chat Sessions -->
+    <div class="chat-sidebar">
+        <div class="chat-sidebar-header">
+            <span>Chat History</span>
+            <button class="btn btn-sm btn-primary" @click="createNewSession()">+ New</button>
+        </div>
+        <div class="chat-session-list">
+            <template x-for="session in sessions" :key="session.id">
+                <div class="chat-session-item" 
+                     :class="session.id === session_id ? 'active' : ''"
+                     @click="selectSession(session.id)">
+                    <div class="chat-session-title" x-text="session.title"></div>
+                    <div class="chat-session-date" x-text="new Date(session.created_at).toLocaleString()"></div>
+                </div>
+            </template>
+            <div x-show="sessions.length === 0" class="text-muted" style="padding: 1rem; text-align: center; font-size: 0.875rem;">
+                No past sessions.
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Console -->
+    <div class="chat-container">
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-messages-inner">
+                <template x-for="(msg, index) in messages" :key="index">
+                    <div class="message-row" :class="msg.role">
+                        <div class="message-avatar" x-text="msg.role === 'user' ? 'U' : 'DC'"></div>
+                        <div class="message-content">
+                            <div class="message-bubble markdown-body" 
+                                 x-html="msg.role === 'agent' ? marked.parse(msg.content) : msg.content" 
+                                 style="white-space: pre-wrap;"></div>
+                            
+                            <template x-if="msg.isAction && pendingAction && pendingAction.action_id === msg.actionId">
+                                <div class="mt-4 flex gap-4">
+                                    <button class="btn btn-primary btn-sm" @click="submitApproval(msg.actionId, true)">Approve</button>
+                                    <button class="btn btn-sm" style="border-color: var(--danger); color: var(--danger);" @click="submitApproval(msg.actionId, false)">Reject</button>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <div class="chat-input-wrapper">
+            <div class="chat-input-container">
+                <div class="chat-input-box">
+                    <textarea class="chat-input" 
+                              rows="1" 
+                              placeholder="Ask me to check server logs, deploy code, or fix an issue..." 
+                              x-model="input"
+                              @input="$el.style.height = 'auto'; $el.style.height = ($el.scrollHeight) + 'px';"
+                              @keydown.enter.prevent="sendMessage()"></textarea>
+                    <button class="send-btn" @click="sendMessage()" :disabled="!input.trim() || pendingAction">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+                <div class="chat-disclaimer">DevOps Copilot can make mistakes. Please verify critical actions on production servers.</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
