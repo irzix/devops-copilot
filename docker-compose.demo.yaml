@@ -24,11 +24,8 @@ services:
     volumes:
       - api_data:/app/data
     environment:
-      # Use Ollama on the host machine (host.docker.internal resolves to host)
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
-      - OLLAMA_MODEL=qwen2.5:7b
       - JWT_SECRET_KEY=demo_secret_key_change_in_production
-      - ENCRYPTION_KEY=ZGVtb19lbmNyeXB0aW9uX2tleV9jaGFuZ2VfaW5fcHJvZHVjdGlvbg==
+      - ENCRYPTION_KEY=LlwJnAwK64hppDIrdphEA_TQgX9-axJxMSxlZ4fQ8sE=
     depends_on:
       - demo-server
     restart: unless-stopped

@@ -5,23 +5,25 @@ from app.core.config import settings
 def _get_provider_config() -> dict:
     """Resolve LLM provider configuration.
 
-    Supports two backends:
-      1. **Ollama** (local, free) — set ``OLLAMA_BASE_URL`` in ``.env``
-         (e.g. ``http://localhost:11434/v1``).
-      2. **OpenRouter** (cloud) — set ``OPENROUTER_API_KEY`` in ``.env``.
-
-    Ollama is tried first so contributors can run the project without any
-    paid API key.
+    Supports two backends based on `LLM_PROVIDER`:
+      1. **ollama** (local, free) — set ``OLLAMA_BASE_URL`` in ``.env``
+      2. **openrouter** (cloud) — set ``OPENROUTER_API_KEY`` in ``.env``.
     """
-    if settings.OLLAMA_BASE_URL:
+    provider = settings.LLM_PROVIDER.lower()
+    
+    if provider == "ollama":
+        if not settings.OLLAMA_BASE_URL:
+            raise ValueError("OLLAMA_BASE_URL is required when LLM_PROVIDER is 'ollama'")
         return {
-            "openai_api_key": "ollama",  # Ollama doesn't need a real key
+            "openai_api_key": "ollama",
             "openai_api_base": settings.OLLAMA_BASE_URL,
             "model": settings.OLLAMA_MODEL,
             "default_headers": {},
         }
-
-    if settings.OPENROUTER_API_KEY:
+    
+    if provider == "openrouter":
+        if not settings.OPENROUTER_API_KEY:
+            raise ValueError("OPENROUTER_API_KEY is required when LLM_PROVIDER is 'openrouter'")
         return {
             "openai_api_key": settings.OPENROUTER_API_KEY,
             "openai_api_base": "https://openrouter.ai/api/v1",
@@ -32,11 +34,7 @@ def _get_provider_config() -> dict:
             },
         }
 
-    raise ValueError(
-        "No LLM provider configured. "
-        "Set OLLAMA_BASE_URL (free, local) or OPENROUTER_API_KEY in your .env file. "
-        "See README for setup instructions."
-    )
+    raise ValueError(f"Unsupported LLM_PROVIDER: '{provider}'. Use 'ollama' or 'openrouter'.")
 
 
 def get_llm(callbacks=None) -> ChatOpenAI:

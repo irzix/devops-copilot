@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     # Key for encrypting target server credentials (SSH passwords/private keys)
     ENCRYPTION_KEY: str = "h-0rAgfuXQnNinQ9yZevWRvRNv9_nWdixhHG_DZGmoE="
     
+    # LLM Provider Selection (e.g., 'openrouter' or 'ollama')
+    LLM_PROVIDER: str = "openrouter"
+    
     # Ollama (local, free — preferred for development and contributors)
     # Set OLLAMA_BASE_URL to enable local LLM inference without any API key.
     # Example: OLLAMA_BASE_URL=http://localhost:11434/v1

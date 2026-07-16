@@ -129,6 +129,68 @@ async def list_available_servers() -> str:
         return f"Error retrieving server list: {str(e)}"
 
 @tool
+async def execute_on_server_group(tag: str, command: str) -> str:
+    """
+    Execute a read-only command on ALL servers matching a tag (e.g., 'production', 'web').
+    Only read-only commands are allowed in bulk execution for safety.
+    """
+    try:
+        if is_write_command(command):
+            return "Error: Bulk execution only supports read-only commands for safety."
+            
+        owner_id = active_owner_id.get()
+        async with async_session_maker() as session:
+            statement = select(Server).where(Server.owner_id == owner_id)
+            result = await session.exec(statement)
+            all_servers = result.all()
+            
+            servers = [s for s in all_servers if s.tags and tag in [t.strip() for t in s.tags.split(',')]]
+            
+            if not servers:
+                return f"No servers found with tag '{tag}'."
+                
+        results = []
+        
+        async def _run(server):
+            credential = decrypt_data(server.encrypted_credential)
+            conn_args = {
+                "host": server.ip_address,
+                "port": server.ssh_port,
+                "username": server.ssh_username,
+                "known_hosts": None,
+            }
+            if server.ssh_auth_type == "password":
+                conn_args["password"] = credential
+            else:
+                try:
+                    conn_args["client_keys"] = [asyncssh.import_private_key(credential)]
+                except Exception as e:
+                    return f"[{server.name}] Error: Invalid SSH private key format: {str(e)}"
+                    
+            try:
+                async with asyncssh.connect(**conn_args) as conn:
+                    res = await conn.run(command, check=False)
+                    return f"[{server.name}] Exit: {res.exit_status}\nStdout: {res.stdout}\nStderr: {res.stderr}"
+            except Exception as e:
+                return f"[{server.name}] SSH Error: {str(e)}"
+
+        # Run concurrently
+        task_results = await asyncio.gather(*[_run(server) for server in servers], return_exceptions=True)
+        
+        output = f"Bulk execution results for tag '{tag}' ({len(servers)} servers):\n"
+        output += "=" * 40 + "\n"
+        for res in task_results:
+            if isinstance(res, Exception):
+                output += f"Exception: {str(res)}\n"
+            else:
+                output += str(res) + "\n"
+            output += "-" * 40 + "\n"
+            
+        return output
+    except Exception as e:
+        return f"Tool Execution Error: {str(e)}"
+
+@tool
 async def execute_ssh_command(server_id: int | str, command: str) -> str:
     """
     Execute a terminal command asynchronously on a target server via SSH.
@@ -498,6 +560,7 @@ tools = [
     fetch_server_config,
     record_lesson_learned,
     search_lessons_learned,
+    execute_on_server_group,
 ]
 
 # Setup agent prompt template
