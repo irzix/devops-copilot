@@ -1,21 +1,9 @@
 from app.modules.memory.types import AgentState, MemoryContext, ExtractedFact
-from app.modules.memory.stores import (
-    SemanticStore,
-    LessonStore,
-    EpisodicStore,
-    UserFactStore,
-    ProceduralStore,
-)
-from app.modules.memory.manager import memory_manager
+from app.modules.memory.manager import get_learner
 
 __all__ = [
     "AgentState",
     "MemoryContext",
     "ExtractedFact",
-    "SemanticStore",
-    "LessonStore",
-    "EpisodicStore",
-    "UserFactStore",
-    "ProceduralStore",
-    "memory_manager",
+    "get_learner",
 ]

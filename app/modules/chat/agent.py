@@ -16,7 +16,8 @@ from langgraph.types import interrupt
 from langgraph.errors import GraphInterrupt
 from app.core.llm import get_llm, get_llm_non_streaming  # noqa: F401 (re-exported for modules that import from here)
 from app.modules.memory.types import AgentState
-from app.modules.memory.manager import memory_manager
+from app.modules.memory.manager import get_learner
+from experia.integrations.langgraph.nodes import ExperiaLearningNode
 
 # Infrastructure errors that the agent cannot fix by rephrasing a command.
 # When any of these strings appear in a ToolMessage, self-correction is skipped.
@@ -586,18 +587,14 @@ IMPORTANT INSTRUCTIONS:
 # Map tools list to dict for node execution
 tools_dict = {t.name: t for t in tools}
 
-def read_memory_node(state: AgentState) -> dict:
+async def read_memory_node(state: AgentState) -> dict:
     """Retrieve episodic summaries, general knowledge, and user specifications."""
     last_msg = state["messages"][-1]
     query = last_msg.content if isinstance(last_msg.content, str) else str(last_msg.content)
     
-    context = memory_manager.read_context(query, owner_id=state["owner_id"])
+    learner = await get_learner(state["owner_id"])
+    context_str = await learner.retrieve_context(query=query, limit=5)
     
-    context_str = (
-        f"=== PAST incident lessons learned ===\n{context.lessons}\n\n"
-        f"{context.knowledge}\n\n"
-        f"=== PRIOR session summaries ===\n{context.episodic}"
-    )
     return {"memory_context": context_str, "retry_count": 0}
 
 async def agent_node(state: AgentState, config: RunnableConfig) -> dict:
@@ -734,11 +731,11 @@ async def evaluator_node(state: AgentState) -> dict:
 async def write_memory_node(state: AgentState) -> dict:
     """Async background task for facts extraction, consolidation, and summarization."""
     owner_id = state.get("owner_id")
-    session_id = state.get("session_id")
-    if owner_id and session_id:
-        asyncio.create_task(
-            memory_manager.write_after_turn(state["messages"], owner_id, session_id)
-        )
+    if owner_id:
+        learner = await get_learner(owner_id)
+        node = ExperiaLearningNode(agent=learner)
+        # ExperiaLearningNode executes asynchronously and fires background tasks for recording
+        await node(state)
     return {}
 
 def route_after_agent(state: AgentState) -> str:
